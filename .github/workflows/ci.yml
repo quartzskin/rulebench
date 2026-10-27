@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e .[dev]
+      - run: ruff check .
+      - run: pytest
+      - run: python -m rulebench gen fixtures
+      - run: python -m rulebench check examples/markers.yar fixtures --expect examples/expect.json
