@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rulebench</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-bottom: 1px solid #aaa; }
+  header h1 { font-size: 16px; margin: 0; }
+  header span { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px; height: calc(100vh - 38px); }
+  section { border: 1px solid #aaa; display: flex; flex-direction: column; min-height: 0; }
+  section > h2 { margin: 0; padding: 4px 8px; font-size: 14px; border-bottom: 1px solid #aaa; display: flex; gap: 8px; align-items: center; }
+  section > h2 .sp { flex: 1; }
+  .body { overflow: auto; padding: 8px 10px; flex: 1; min-height: 0; }
+  textarea { width: 100%; flex: 1; border: 0; resize: none; font: 13px/1.45 monospace; padding: 8px 10px; outline: none; tab-size: 4; }
+  input[type=text] { font: inherit; width: 100%; }
+  .diag { border-top: 1px solid #aaa; max-height: 28%; overflow: auto; padding: 6px 10px; }
+  .ok { color: #060; } .err { color: #a00; cursor: pointer; } .warn { color: #860; cursor: pointer; }
+  pre { margin: 2px 0; font: 12px/1.35 monospace; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: 2px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  tr.file { background: #eee; cursor: pointer; }
+  .pass { color: #060; } .fail { color: #a00; font-weight: bold; } .missing { color: #860; } .none { color: #666; }
+  .hit { font: 12px monospace; margin-left: 14px; }
+  .left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .left > section:first-child { flex: 3; } .left > section:last-child { flex: 2; }
+  .small { font-size: 12px; color: #555; }
+</style>
+</head>
+<body>
+<header><h1>rulebench</h1><span id="where"></span></header>
+<main>
+  <div class="left">
+    <section>
+      <h2>Rules <span class="sp"></span><span id="status" class="small"></span>
+        <button id="save">Save</button><button id="scan">Scan fixtures</button></h2>
+      <textarea id="src" spellcheck="false"></textarea>
+      <div class="diag" id="diag"></div>
+    </section>
+    <section>
+      <h2>Fixtures <span class="sp"></span>
+        <button id="gen">Generate samples</button>
+        <button id="add">Add file</button>
+        <input id="upl" type="file" hidden></h2>
+      <div class="body" id="files"></div>
+    </section>
+  </div>
+  <section>
+    <h2>Results <span class="sp"></span><span id="summary" class="small"></span></h2>
+    <div class="body" id="results"><span class="small">Scan to see matches.</span></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let state = { files: [], annotations: [] }, last = null, timer = null;
+
+async function api(route, body) {
+  const opt = body === undefined ? {} :
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  const r = await fetch(route, opt);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const ann = (rule, fix) => state.annotations.find(a => a.rule === rule && a.fixture === fix);
+
+function showDiag(v) {
+  const el = $('diag');
+  if (v.ok) {
+    $('status').textContent = '';
+    el.innerHTML = '<div class="ok">Compiles. Rules: ' + (v.rules || []).map(esc).join(', ') + '</div>' +
+      (v.warnings || []).map((w, i) => diagLine('warn', w, i)).join('');
+  } else {
+    el.innerHTML = v.errors.map((e, i) => diagLine('err', e, i)).join('');
+  }
+  el.querySelectorAll('[data-s]').forEach(n => n.onclick = () => {
+    const t = $('src'); t.focus();
+    t.setSelectionRange(+n.dataset.s, Math.max(+n.dataset.e, +n.dataset.s + 1));
+  });
+}
+function diagLine(cls, d, i) {
+  return `<div class="${cls}" data-s="${d.start ?? 0}" data-e="${d.end ?? 0}">` +
+    `line ${d.line}, col ${d.column}: ${esc(d.title)}` +
+    (d.label ? ` <span class="small">(${esc(d.label)})</span>` : '') + '</div>';
+}
+async function validate() {
+  try { showDiag(await api('/api/validate', { source: $('src').value })); }
+  catch (e) { $('diag').textContent = e.message; }
+}
+$('src').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(validate, 250); });
+$('src').addEventListener('keydown', e => {
+  if (e.key === 'Tab') { e.preventDefault(); document.execCommand('insertText', false, '    '); }
+});
+
+function renderFiles() {
+  $('files').innerHTML = state.files.length ? '<table>' + state.files.map(f =>
+    `<tr><td><a href="#" data-view="${esc(f)}">${esc(f)}</a></td>` +
+    `<td><button data-del="${esc(f)}">delete</button></td></tr>`).join('') + '</table>'
+    : '<span class="small">Empty. Add files or generate the sample set.</span>';
+  $('files').querySelectorAll('[data-view]').forEach(a => a.onclick = ev => { ev.preventDefault(); view(a.dataset.view); });
+  $('files').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete ' + b.dataset.del + '?')) return;
+    state.files = (await api('/api/fixture/delete', { path: b.dataset.del })).files; renderFiles();
+  });
+}
+async function view(path) {
+  const v = await api('/api/view', { path });
+  $('results').innerHTML = `<b>${esc(path)}</b> <span class="small">${v.size} bytes, first 4096 shown</span><pre>` +
+    v.rows.map(r => r.offset.toString(16).padStart(6, '0') + '  ' + r.hex.padEnd(47) + '  ' + esc(r.text)).join('\n') +
+    '</pre><button id="back">Back to results</button>';
+  $('back').onclick = () => last ? renderResults() : ($('results').textContent = '');
+}
+
+function tag(status) { return `<span class="${status}">${status}</span>`; }
+function renderResults() {
+  const out = [];
+  const checks = last.checks;
+  const matchedBy = (path, rule) => last.results.find(r => r.path === path).matches.find(m => m.rule === rule);
+  for (const r of last.results) {
+    const rowsFor = checks.filter(c => c.fixture === r.path);
+    out.push(`<tr class="file"><td colspan="3"><b>${esc(r.path)}</b> <span class="small">${r.size} bytes</span>` +
+      (r.error ? ` <span class="err">${esc(r.error)}</span>` : '') + '</td></tr>');
+    const rules = new Set([...r.matches.map(m => m.rule), ...rowsFor.map(c => c.rule)]);
+    if (!rules.size) out.push('<tr><td colspan="3" class="small">no matches</td></tr>');
+    for (const rule of rules) {
+      const m = matchedBy(r.path, rule), a = ann(rule, r.path), c = rowsFor.find(c => c.rule === rule);
+      const sel = `<select data-rule="${esc(rule)}" data-fix="${esc(r.path)}">` +
+        [['', 'no expectation'], ['true', 'expect match'], ['false', 'expect no match']].map(([v, l]) =>
+          `<option value="${v}"${(a && a.expect !== null ? String(a.expect) : '') === v ? ' selected' : ''}>${l}</option>`).join('') + '</select>';
+      out.push(`<tr><td>${m ? 'matched' : 'no match'} <b>${esc(rule)}</b>` +
+        (m && m.tags.length ? ' <span class="small">: ' + m.tags.map(esc).join(' ') + '</span>' : '') + '</td>' +
+        `<td>${c ? tag(c.status) : tag('none')}</td><td>${sel}</td></tr>`);
+      if (m) for (const p of m.patterns) {
+        out.push(`<tr><td colspan="3" class="hit"><b>${esc(p.id)}</b> x${p.count}` +
+          p.hits.slice(0, 6).map(h => `<br>@${h.offset} (${h.length}b) ${esc(h.text)}`).join('') +
+          (p.count > 6 ? '<br>...' : '') + '</td></tr>');
+      }
+      out.push(`<tr><td colspan="3"><input type="text" placeholder="false-positive note" value="${esc(a ? a.note : '')}" ` +
+        `data-nrule="${esc(rule)}" data-nfix="${esc(r.path)}"></td></tr>`);
+    }
+  }
+  const s = last.summary;
+  $('summary').textContent = `${s.pass} pass, ${s.fail} fail, ${s.missing} missing`;
+  $('results').innerHTML = '<table>' + out.join('') + '</table>';
+  $('results').querySelectorAll('select').forEach(sel => sel.onchange = async () => {
+    const v = sel.value === '' ? null : sel.value === 'true';
+    state.annotations = (await api('/api/expect', { rule: sel.dataset.rule, fixture: sel.dataset.fix, expect: v })).annotations;
+    scan();
+  });
+  $('results').querySelectorAll('input[data-nrule]').forEach(inp => inp.onchange = async () => {
+    state.annotations = (await api('/api/note', { rule: inp.dataset.nrule, fixture: inp.dataset.nfix, note: inp.value })).annotations;
+  });
+}
+async function scan() {
+  try {
+    const r = await api('/api/scan', { source: $('src').value });
+    if (!r.ok) { showDiag(r); $('results').innerHTML = '<span class="err">Fix the compile errors first.</span>'; return; }
+    last = r; state.annotations = r.annotations; showDiag(r); renderResults();
+  } catch (e) { $('results').textContent = e.message; }
+}
+$('scan').onclick = scan;
+$('add').onclick = () => $('upl').click();
+$('save').onclick = async () => {
+  try { await api('/api/save', { source: $('src').value }); $('status').textContent = 'saved'; }
+  catch (e) { $('status').textContent = e.message; }
+};
+$('gen').onclick = async () => { state.files = (await api('/api/fixture/generate', {})).files; renderFiles(); };
+$('upl').onchange = async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  const buf = new Uint8Array(await f.arrayBuffer());
+  let bin = ''; for (let i = 0; i < buf.length; i += 8192) bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+  try { state.files = (await api('/api/fixture/add', { path: f.name, data: btoa(bin) })).files; renderFiles(); }
+  catch (e) { alert(e.message); }
+  ev.target.value = '';
+};
+
+(async () => {
+  state = await api('/api/state');
+  $('where').textContent = 'fixtures: ' + state.fixture_dir;
+  $('src').value = state.source;
+  renderFiles();
+  if ($('src').value) scan(); else validate();
+})();
+</script>
+</body>
+</html>
