@@ -105,7 +105,8 @@ class Fixtures:
     def resolve(self, rel):
         if not isinstance(rel, str) or not rel or "\0" in rel or ":" in rel:
             raise PathError("bad path")
-        for part in rel.replace("\\", "/").split("/"):
+        rel = rel.replace("\\", "/")
+        for part in rel.split("/"):
             if part.split(".")[0].rstrip(" ").lower() in RESERVED:
                 raise PathError("reserved device name")
         path = (self.root / rel).resolve()
