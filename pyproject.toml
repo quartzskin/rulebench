@@ -1,0 +1,32 @@
+[project]
+name = "rulebench"
+version = "0.1.0"
+description = "Local YARA-X rule playground with a small fixture test harness"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["yara-x>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+rulebench = "rulebench.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["rulebench*"]
+
+[tool.setuptools.package-data]
+rulebench = ["static/*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,23 @@
+{
+  "marker_ascii": {
+    "plain/marker.txt": true,
+    "plain/marker_and_label.txt": true,
+    "plain/near_miss.txt": false,
+    "plain/clean.txt": false,
+    "binary/marker_wide.bin": false,
+    "binary/marker_in_noise.bin": true,
+    "encoded/marker_upper.txt": false,
+    "encoded/marker_hex.txt": false
+  },
+  "marker_any_encoding": {
+    "binary/marker_wide.bin": true,
+    "encoded/marker_upper.txt": true,
+    "plain/near_miss.txt": false,
+    "binary/clean_noise.bin": false
+  },
+  "marker_with_label": {
+    "plain/marker_and_label.txt": true,
+    "plain/marker.txt": false,
+    "plain/label_only.txt": false
+  }
+}
